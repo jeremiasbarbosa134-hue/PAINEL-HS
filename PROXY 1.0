@@ -1,0 +1,284 @@
+-- ==========================================
+-- PROXY SPRAIT - COMPACTO, FUNDO PRETO E ARRASTÁVEL
+-- ==========================================
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local CoreGui = game:GetService("CoreGui")
+local Camera = workspace.CurrentCamera
+local LP = Players.LocalPlayer
+
+-- Cores
+local Colors = {
+    Fundo = Color3.fromRGB(10, 10, 10), -- Fundo Preto
+    Vermelho = Color3.fromRGB(210, 0, 0),
+    TextoBranco = Color3.fromRGB(255, 255, 255),
+    TextoCinza = Color3.fromRGB(150, 150, 150),
+    ToggleOff = Color3.fromRGB(50, 50, 50),
+    ToggleOn = Color3.fromRGB(255, 50, 50)
+}
+
+-- Estado
+local UI_Config = { ESP = false, ESP_Skeleton = false, ESP_Health = false, Aimbot = false, Aimbot_FOV = false }
+local Active_Config = { ESP = false, ESP_Skeleton = false, ESP_Health = false, Aimbot = false, Aimbot_FOV = false }
+
+local function IsTeammate(player)
+    if not LP.Team or not player.Team then return false end
+    return player.Team == LP.Team
+end
+
+-- ==========================================
+-- FUNÇÕES (ESP E AIMBOT)
+-- ==========================================
+local ESP_Cache = {}
+local function CreateESP(player)
+    if player == LP then return end
+    local d = {
+        SkeletonLines = {}, 
+        HeadCircle = Drawing.new("Circle"),
+        HealthBg = Drawing.new("Square"),
+        HealthFg = Drawing.new("Square")
+    }
+    d.HeadCircle.Thickness = 1.5; d.HeadCircle.NumSides = 20; d.HeadCircle.Color = Color3.fromRGB(255, 255, 255); d.HeadCircle.Filled = false; d.HeadCircle.Visible = false
+    d.HealthBg.Filled = true; d.HealthBg.Color = Color3.fromRGB(0, 0, 0); d.HealthBg.Visible = false
+    d.HealthFg.Filled = true; d.HealthFg.Color = Color3.fromRGB(0, 255, 0); d.HealthFg.Visible = false
+    ESP_Cache[player] = d
+end
+
+local function GetSkeletonParts(char)
+    local parts = {}
+    local function add(a, b)
+        if char:FindFirstChild(a) and char:FindFirstChild(b) then
+            table.insert(parts, {p1 = char[a], p2 = char[b]})
+        end
+    end
+    add("Head", "UpperTorso"); add("UpperTorso", "LowerTorso")
+    add("UpperTorso", "LeftUpperArm"); add("LeftUpperArm", "LeftLowerArm")
+    add("UpperTorso", "RightUpperArm"); add("RightUpperArm", "RightLowerArm")
+    add("LowerTorso", "LeftUpperLeg"); add("LeftUpperLeg", "LeftLowerLeg")
+    add("LowerTorso", "RightUpperLeg"); add("RightUpperLeg", "RightLowerLeg")
+    return parts
+end
+
+RunService.RenderStepped:Connect(function()
+    for player, d in pairs(ESP_Cache) do
+        local char = player.Character
+        local isAlly = IsTeammate(player)
+
+        if Active_Config.ESP and char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChild("Humanoid") and char.Humanoid.Health > 0 and not isAlly then
+            local root = char.HumanoidRootPart
+            local head = char:FindFirstChild("Head")
+            
+            if root and head then
+                local rootPos, onScreen = Camera:WorldToViewportPoint(root.Position)
+                local headPos = Camera:WorldToViewportPoint(head.Position)
+
+                if onScreen and rootPos.Z > 0 then
+                    local distance = (Camera.CFrame.Position - root.Position).Magnitude
+                    local height = 2000 / distance
+                    local width = height / 2
+                    local x = rootPos.X - width / 2
+                    local y = headPos.Y - height / 4
+
+                    if Active_Config.ESP_Health then
+                        local hpPct = math.clamp(char.Humanoid.Health / char.Humanoid.MaxHealth, 0, 1)
+                        d.HealthBg.Visible = true
+                        d.HealthBg.Size = Vector2.new(4, height)
+                        d.HealthBg.Position = Vector2.new(x - 8, y)
+                        d.HealthFg.Visible = true
+                        d.HealthFg.Size = Vector2.new(4, height * hpPct)
+                        d.HealthFg.Position = Vector2.new(x - 8, y + (height - (height * hpPct)))
+                    else
+                        d.HealthBg.Visible = false; d.HealthFg.Visible = false
+                    end
+                    
+                    if Active_Config.ESP_Skeleton then
+                        local skeleton = GetSkeletonParts(char)
+                        while #d.SkeletonLines < #skeleton do
+                            local line = Drawing.new("Line"); line.Thickness = 2.5; line.Color = Color3.fromRGB(255, 255, 255)
+                            table.insert(d.SkeletonLines, line)
+                        end
+                        for i, bone in ipairs(skeleton) do
+                            local line = d.SkeletonLines[i]
+                            local p1, os1 = Camera:WorldToViewportPoint(bone.p1.Position)
+                            local p2, os2 = Camera:WorldToViewportPoint(bone.p2.Position)
+                            if os1 and os2 and p1.Z > 0 and p2.Z > 0 then
+                                line.From = Vector2.new(p1.X, p1.Y); line.To = Vector2.new(p2.X, p2.Y); line.Visible = true
+                            else line.Visible = false end
+                        end
+                        for i = #skeleton + 1, #d.SkeletonLines do d.SkeletonLines[i].Visible = false end
+                        d.HeadCircle.Position = Vector2.new(headPos.X, headPos.Y)
+                        d.HeadCircle.Radius = math.clamp(150 / distance, 6, 40)
+                        d.HeadCircle.Visible = true
+                    else
+                        for _, line in ipairs(d.SkeletonLines) do line.Visible = false end
+                        d.HeadCircle.Visible = false
+                    end
+                else
+                    d.HealthBg.Visible = false; d.HealthFg.Visible = false
+                    for _, line in ipairs(d.SkeletonLines) do line.Visible = false end
+                    d.HeadCircle.Visible = false
+                end
+            end
+        else
+            if d.HealthBg then d.HealthBg.Visible = false; d.HealthFg.Visible = false end
+            for _, line in ipairs(d.SkeletonLines) do line.Visible = false end
+            d.HeadCircle.Visible = false
+        end
+    end
+end)
+
+for _, p in ipairs(Players:GetPlayers()) do CreateESP(p) end
+Players.PlayerAdded:Connect(CreateESP)
+
+-- ==========================================
+-- AIMBOT E FOV
+-- ==========================================
+local FovCircle = Drawing.new("Circle")
+FovCircle.Thickness = 1.5; FovCircle.NumSides = 60; FovCircle.Filled = false; FovCircle.Color = Color3.fromRGB(255, 255, 255)
+
+local function CanSee(targetPart)
+    local Origin = Camera.CFrame.Position
+    local Direction = (targetPart.Position - Origin).Unit * (targetPart.Position - Origin).Magnitude
+    local RaycastParams = RaycastParams.new()
+    RaycastParams.FilterType = Enum.RaycastFilterType.Exclude
+    RaycastParams.FilterDescendantsInstances = {LP.Character, targetPart.Parent}
+    local Result = workspace:Raycast(Origin, Direction, RaycastParams)
+    if not Result then return true end
+    if Result.Instance:IsDescendantOf(targetPart.Parent) then return true end
+    return false
+end
+
+RunService.RenderStepped:Connect(function()
+    local viewportSize = Camera.ViewportSize
+    FovCircle.Position = Vector2.new(viewportSize.X / 2, viewportSize.Y / 2)
+    FovCircle.Radius = math.min(viewportSize.X, viewportSize.Y) / 1.5 
+    FovCircle.Visible = Active_Config.Aimbot_FOV and Active_Config.Aimbot
+
+    if Active_Config.Aimbot then
+        local closest, shortestDist = nil, FovCircle.Radius
+        for _, p in ipairs(Players:GetPlayers()) do
+            if p ~= LP and not IsTeammate(p) and p.Character and p.Character:FindFirstChild("Head") and p.Character:FindFirstChild("Humanoid") and p.Character.Humanoid.Health > 0 then
+                local pos, onScreen = Camera:WorldToViewportPoint(p.Character.Head.Position)
+                if onScreen then
+                    local dist = (Vector2.new(pos.X, pos.Y) - FovCircle.Position).Magnitude
+                    if dist < shortestDist and CanSee(p.Character.Head) then
+                        shortestDist = dist
+                        closest = p.Character.Head 
+                    end
+                end
+            end
+        end
+        if closest then Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position) end
+    end
+end)
+
+-- ==========================================
+-- INTERFACE COMPACTA (PROXY SPRAIT)
+-- ==========================================
+if CoreGui:FindFirstChild("ProxyMenu") then CoreGui:FindFirstChild("ProxyMenu"):Destroy() end
+local SG = Instance.new("ScreenGui"); SG.Name = "ProxyMenu"; SG.ResetOnSpawn = false; SG.IgnoreGuiInset = true; SG.Parent = CoreGui
+
+local OpenBtn = Instance.new("TextButton"); OpenBtn.Size = UDim2.new(0, 45, 0, 45); OpenBtn.Position = UDim2.new(0, 15, 0.5, 0)
+OpenBtn.BackgroundColor3 = Colors.Fundo; OpenBtn.Text = "🚇"; OpenBtn.TextColor3 = Colors.Vermelho; OpenBtn.Font = Enum.Font.GothamBlack; OpenBtn.TextSize = 24; OpenBtn.Parent = SG
+OpenBtn.Visible = false
+Instance.new("UICorner", OpenBtn).CornerRadius = UDim.new(0, 8)
+Instance.new("UIStroke", OpenBtn).Color = Colors.Vermelho
+
+-- Painel Principal MENOR
+local Main = Instance.new("Frame")
+Main.Size = UDim2.new(0, 240, 0, 340) -- Mais compacto
+Main.Position = UDim2.new(0, 15, 0.5, -170)
+Main.BackgroundColor3 = Colors.Fundo; Main.BorderSizePixel = 0; Main.Active = true; Main.Parent = SG
+Instance.new("UICorner", Main).CornerRadius = UDim.new(0, 8)
+
+local Header = Instance.new("Frame"); Header.Size = UDim2.new(1, 0, 0, 30); Header.BackgroundTransparency = 1; Header.Parent = Main
+local Title = Instance.new("TextLabel"); Title.Size = UDim2.new(1, -20, 0, 25); Title.Position = UDim2.new(0, 10, 0, 5); Title.BackgroundTransparency = 1; Title.Text = "PROXY SPRAIT"; Title.TextColor3 = Colors.TextoBranco; Title.Font = Enum.Font.GothamBlack; Title.TextSize = 16; Title.TextXAlignment = Enum.TextXAlignment.Left; Title.Parent = Main
+
+local Divider = Instance.new("Frame"); Divider.Size = UDim2.new(1, -20, 0, 1); Divider.Position = UDim2.new(0, 10, 0, 35); Divider.BackgroundColor3 = Colors.ToggleOff; Divider.Parent = Main
+local ExtrasTitle = Instance.new("TextLabel"); ExtrasTitle.Size = UDim2.new(1, -20, 0, 20); ExtrasTitle.Position = UDim2.new(0, 10, 0, 40); ExtrasTitle.BackgroundTransparency = 1; ExtrasTitle.Text = "EXTRAS"; ExtrasTitle.TextColor3 = Colors.Vermelho; ExtrasTitle.Font = Enum.Font.GothamBold; ExtrasTitle.TextSize = 10; ExtrasTitle.TextXAlignment = Enum.TextXAlignment.Left; ExtrasTitle.Parent = Main
+
+local function CreateOption(title, yPos, default, callback)
+    local f = Instance.new("Frame"); f.Size = UDim2.new(1, -20, 0, 30); f.Position = UDim2.new(0, 10, 0, yPos); f.BackgroundColor3 = Colors.Fundo; f.Parent = Main
+    local lbl = Instance.new("TextLabel"); lbl.Size = UDim2.new(1, -50, 1, 0); lbl.BackgroundTransparency = 1; lbl.Text = title; lbl.TextColor3 = Colors.TextoBranco; lbl.Font = Enum.Font.GothamBold; lbl.TextSize = 11; lbl.TextXAlignment = Enum.TextXAlignment.Left; lbl.Parent = f
+
+    local toggleBg = Instance.new("Frame"); toggleBg.Size = UDim2.new(0, 30, 0, 16); toggleBg.Position = UDim2.new(1, -30, 0.5, -8); toggleBg.BackgroundColor3 = default and Colors.ToggleOn or Colors.ToggleOff; toggleBg.Parent = f
+    Instance.new("UICorner", toggleBg).CornerRadius = UDim.new(1, 0)
+    local circle = Instance.new("Frame"); circle.Size = UDim2.new(0, 12, 0, 12); circle.Position = default and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6); circle.BackgroundColor3 = Colors.TextoBranco; circle.Parent = toggleBg
+    Instance.new("UICorner", circle).CornerRadius = UDim.new(1, 0)
+
+    local btn = Instance.new("TextButton"); btn.Size = UDim2.new(1, 0, 1, 0); btn.BackgroundTransparency = 1; btn.Text = ""; btn.Parent = toggleBg
+    local state = default
+    btn.MouseButton1Click:Connect(function()
+        state = not state
+        toggleBg.BackgroundColor3 = state and Colors.ToggleOn or Colors.ToggleOff
+        circle:TweenPosition(state and UDim2.new(1, -14, 0.5, -6) or UDim2.new(0, 2, 0.5, -6), Enum.EasingDirection.Out, Enum.EasingStyle.Quad, 0.1, true)
+        if callback then callback(state) end
+    end)
+end
+
+CreateOption("Ativar ESP", 65, false, function(v) UI_Config.ESP = v end)
+CreateOption("ESP Skeleton", 105, false, function(v) UI_Config.ESP_Skeleton = v end)
+CreateOption("ESP Health Bar", 145, false, function(v) UI_Config.ESP_Health = v end)
+CreateOption("Aimbot Rage", 185, false, function(v) UI_Config.Aimbot = v end)
+CreateOption("Círculo FOV", 225, false, function(v) UI_Config.Aimbot_FOV = v end)
+
+local InjectBtn = Instance.new("TextButton"); InjectBtn.Size = UDim2.new(1, -20, 0, 35); InjectBtn.Position = UDim2.new(0, 10, 1, -45); InjectBtn.BackgroundColor3 = Colors.Vermelho; InjectBtn.Text = "I N J E T A R"; InjectBtn.TextColor3 = Colors.TextoBranco; InjectBtn.Font = Enum.Font.GothamBlack; InjectBtn.TextSize = 13; InjectBtn.Parent = Main
+Instance.new("UICorner", InjectBtn).CornerRadius = UDim.new(0, 6)
+
+InjectBtn.MouseButton1Click:Connect(function()
+    Active_Config.ESP = UI_Config.ESP
+    Active_Config.ESP_Skeleton = UI_Config.ESP_Skeleton
+    Active_Config.ESP_Health = UI_Config.ESP_Health
+    Active_Config.Aimbot = UI_Config.Aimbot
+    Active_Config.Aimbot_FOV = UI_Config.Aimbot_FOV
+
+    InjectBtn.Text = "INJETADO!"
+    InjectBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 0)
+    task.wait(0.5)
+    
+    Main.Visible = false
+    OpenBtn.Visible = true
+end)
+
+OpenBtn.MouseButton1Click:Connect(function()
+    Main.Visible = true
+    OpenBtn.Visible = false
+    InjectBtn.Text = "I N J E T A R"
+    InjectBtn.BackgroundColor3 = Colors.Vermelho
+end)
+
+-- ==========================================
+-- SISTEMA DE ARRASTAR (DRAG) CORRIGIDO
+-- ==========================================
+local dragging = false
+local dragInput, dragStart, startPos
+
+Header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = Main.Position
+        
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+Header.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+        dragInput = input
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then
+        local delta = input.Position - dragStart
+        Main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+print("PROXY SPRAIT - Tamanho reduzido, fundo preto e arrastável!")
